@@ -435,6 +435,12 @@ void mrbc_vm_close( mrbc_vm *vm )
 
   // free irep and vm
   if( vm->top_irep ) mrbc_irep_free( vm->top_irep );
+#if defined(MRBC_PARSE_DBG_SECTION)
+  if ( vm->debug_filenames ) {
+    for(int i = 0; i < vm->debug_filenames_num; i++) mrbc_raw_free(vm->debug_filenames[i]);
+    mrbc_raw_free( vm->debug_filenames );
+  }
+#endif
   if( vm->flag_need_memfree ) mrbc_raw_free(vm);
 }
 

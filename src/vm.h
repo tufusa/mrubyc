@@ -37,6 +37,25 @@ extern "C" {
 /***** Macros ***************************************************************/
 /***** Typedefs *************************************************************/
 //================================================================
+#if defined(MRBC_PARSE_DBG_SECTION)
+typedef struct IREP_DEBUG_INFO_FILE {
+  uint32_t start_pos;
+  uint16_t filename_idx;
+  uint32_t line_entry_count;
+  uint8_t line_type; // 0=ary, 1=flat_map, 2=packed_map
+  union {
+    void *ptr;
+    // ary, flat_map は未対応
+    const uint8_t *packed_map;
+  } lines;
+} mrbc_irep_debug_info_file;
+
+typedef struct IREP_DEBUG_INFO {
+  uint16_t flen;
+  mrbc_irep_debug_info_file **files;
+} mrbc_irep_debug_info;
+#endif // defined(MRBC_PARSE_DBG_SECTION)
+
 /*!@brief
   IREP Internal REPresentation
 */
@@ -56,6 +75,10 @@ typedef struct IREP {
 #if defined(MRBC_DEBUG)
   uint16_t plen;		//!< num of pools
   uint16_t slen;		//!< num of symbols
+#endif
+
+#if defined(MRBC_PARSE_DBG_SECTION)
+  struct IREP_DEBUG_INFO *debug_info;
 #endif
   uint16_t ofs_pools;		//!< offset of data->tbl_pools.
   uint16_t ofs_ireps;		//!< offset of data->tbl_ireps. (pointer aligned)
@@ -164,6 +187,11 @@ typedef struct VM {
   mrbc_value      *cur_regs;		//!< Current register top.
   struct RClass   *target_class;	//!< Target class.
   mrbc_callinfo	  *callinfo_tail;	//!< Last point of CALLINFO link.
+
+#if defined(MRBC_PARSE_DBG_SECTION)
+  uint16_t debug_filenames_num;
+  char **debug_filenames;
+#endif
 
   struct RProc    *ret_blk;		//!< Return block.
   mrbc_value	  exception;		//!< Raised exception or nil.

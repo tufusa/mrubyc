@@ -119,6 +119,8 @@
 #define MRBC_DEBUG
 #endif
 
+#define MRBC_PARSE_DBG_SECTION
+
 // #define MRBC_NO_TIMER
 
 // Console new-line mode.

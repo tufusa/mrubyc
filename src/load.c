@@ -34,7 +34,9 @@ static const int SIZE_RITE_SECTION_HEADER = 12;
 static const int SIZE_RITE_CATCH_HANDLER = 13;
 static const char IREP[4] = "IREP";
 static const char END[4] = "END\0";
-
+#if defined(MRBC_PARSE_DBG_SECTION)
+static const char DBG[4] = "DBG\0";
+#endif
 
 /*! IREP TT */
 enum irep_pool_type {
@@ -151,6 +153,9 @@ static mrbc_irep * load_irep_1(mrbc_vm *vm, const uint8_t *bin, int *len)
   if( ilen > 0xffff ) goto ERROR_TOO_LARGE;
   irep.ilen = ilen;
   irep.inst = p;
+#if defined(MRBC_PARSE_DBG_SECTION)
+  irep.debug_info = NULL;
+#endif
 
   // POOL block
   p += irep.ilen + SIZE_RITE_CATCH_HANDLER * irep.clen;
@@ -286,6 +291,132 @@ static mrbc_irep *load_irep(mrbc_vm *vm, const uint8_t *bin, int *len)
   return irep;
 }
 
+#if defined(MRBC_PARSE_DBG_SECTION)
+static void *load_debug_record(mrbc_vm *vm, mrbc_irep *irep, const uint8_t *bin, int *len) {
+  irep->debug_info = (mrbc_irep_debug_info*)mrbc_raw_alloc(sizeof(mrbc_irep_debug_info));
+  if(!irep->debug_info) {
+    mrbc_raise(vm, MRBC_CLASS(Exception), "Cannot allocate");
+    return NULL;
+  }
+
+  uint32_t record_size = bin_to_uint32(bin); bin += sizeof(uint32_t);
+  uint16_t files_num = bin_to_uint16(bin); bin += sizeof(uint16_t);
+  
+  irep->debug_info->flen = files_num;
+  irep->debug_info->files = (mrbc_irep_debug_info_file**)mrbc_raw_calloc(files_num, sizeof(mrbc_irep_debug_info_file*));
+  if(!irep->debug_info->files) {
+    mrbc_raise(vm, MRBC_CLASS(Exception), "Cannot allocate");
+    return NULL;
+  }
+
+  for(int i = 0; i < files_num; i++) {
+    mrbc_irep_debug_info_file *file = (mrbc_irep_debug_info_file*)mrbc_raw_alloc(sizeof(mrbc_irep_debug_info_file));
+    if(!file) {
+      mrbc_raise(vm, MRBC_CLASS(Exception), "Cannot allocate");
+      return NULL;
+    }
+
+    irep->debug_info->files[i] = file;
+
+    uint32_t start_pos = bin_to_uint32(bin); bin += sizeof(uint32_t);
+    uint16_t filename_idx = bin_to_uint16(bin); bin += sizeof(uint16_t);
+    uint32_t line_entry_count = bin_to_uint32(bin); bin += sizeof(uint32_t);
+    uint8_t line_type = *bin; bin += sizeof(uint8_t);
+
+    file->start_pos = start_pos;
+    file->filename_idx = filename_idx;
+    file->line_entry_count = line_entry_count;
+    file->line_type = line_type;
+
+    switch (line_type)
+    {
+    case 0: // line_ary
+    case 1: // line_flat_map
+      mrbc_raisef(vm, MRBC_CLASS(NotImplementedError), "Not implemented (line_type=%d)", line_type);
+      return NULL;
+    case 2: // line_packed_map
+      uint8_t *packed_map = (uint8_t*)mrbc_raw_calloc(line_entry_count, sizeof(uint8_t));
+      memcpy(packed_map, bin, line_entry_count);
+      file->lines.packed_map = packed_map;
+      bin += line_entry_count;
+      break;
+    default:
+      mrbc_raise(vm, MRBC_CLASS(Exception), "Invalid line_type");
+      return NULL;
+    }
+  }
+
+  *len += record_size;
+  return NULL;
+}
+
+static void *load_debug_records(mrbc_vm *vm, mrbc_irep *irep, const uint8_t *bin, int *len) {
+  int l = 0, total_len = 0;
+  load_debug_record(vm, irep, bin, &l);
+  bin += l;
+  total_len += l;
+
+  for(int i = 0; i < irep->rlen; i++) {
+    l = 0;
+    load_debug_records(vm, mrbc_irep_child_irep(irep, i), bin, &l);
+    bin += l;
+    total_len += l;
+  }
+
+  *len = total_len;
+  return NULL;
+}
+
+static void *load_debug(mrbc_vm *vm, const uint8_t *bin) {
+  bin += sizeof(DBG); // "DBG\0"
+  uint32_t section_len = bin_to_uint32(bin); bin += sizeof(uint32_t);
+  uint16_t filenames_num = bin_to_uint16(bin); bin += sizeof(uint16_t);
+
+  char **filenames = (char**)mrbc_raw_calloc(filenames_num, sizeof(char*));
+
+  for(int i = 0; i < filenames_num; i++) {
+    uint16_t filename_len = bin_to_uint16(bin); bin += sizeof(uint16_t);
+  
+    char *filename = (char*)mrbc_raw_calloc(filename_len + 1, sizeof(char)); // '\0'分を +1
+    memcpy(filename, bin, filename_len);
+    filename[filename_len] = '\0';
+
+    filenames[i] = filename;
+    bin += filename_len;
+  }
+
+  int len;
+  load_debug_records(vm, vm->top_irep, bin, &len);
+
+  vm->debug_filenames_num = filenames_num;
+  vm->debug_filenames = filenames;
+
+  return NULL;
+}
+
+static int mrbc_load_debug(mrbc_vm *vm, const void *bytecode) {
+  const uint8_t *bin = bytecode;
+
+  load_debug(vm, bin);
+  return mrbc_israised(vm);
+}
+
+static void mrbc_irep_debug_info_free(mrbc_irep_debug_info *info) {
+  if(!info) return;
+  
+  if(info->files) {
+    for(int i = 0; i < info->flen; i++) {
+      if (info->files[i]) {
+        mrbc_raw_free(info->files[i]->lines.ptr);
+        mrbc_raw_free(info->files[i]);
+      }
+    }
+    mrbc_raw_free(info->files);
+  }
+  mrbc_raw_free(info);
+}
+#endif // defined(MRBC_PARSE_DBG_SECTION)
+
 
 /***** Global functions *****************************************************/
 
@@ -309,7 +440,13 @@ int mrbc_load_mrb(mrbc_vm *vm, const void *bytecode)
     if( memcmp(bin, IREP, sizeof(IREP)) == 0 ) {
       if( mrbc_load_irep( vm, bin ) != 0 ) break;
 
-    } else if( memcmp(bin, END, sizeof(END)) == 0 ) {
+    }
+#if defined(MRBC_PARSE_DBG_SECTION)
+    else if ( memcmp(bin, DBG, sizeof(DBG)) == 0 ) {
+      if( mrbc_load_debug( vm, bin ) != 0 ) break;
+    }
+#endif
+    else if( memcmp(bin, END, sizeof(END)) == 0 ) {
       break;
     }
     // ignore other section.
@@ -352,6 +489,9 @@ void mrbc_irep_free(mrbc_irep *irep)
   }
 
   if( irep->ref_count == 0 ) {
+#if defined(MRBC_PARSE_DBG_SECTION)
+    mrbc_irep_debug_info_free(irep->debug_info);
+#endif
     mrbc_raw_free( irep );
   }
 }
