@@ -121,6 +121,8 @@
 
 #define MRBC_PARSE_DBG_SECTION
 
+#define MRBC_PARSE_LVAR_SECTION
+
 // #define MRBC_NO_TIMER
 
 // Console new-line mode.

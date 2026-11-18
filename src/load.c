@@ -37,6 +37,9 @@ static const char END[4] = "END\0";
 #if defined(MRBC_PARSE_DBG_SECTION)
 static const char DBG[4] = "DBG\0";
 #endif
+#if defined(MRBC_PARSE_LVAR_SECTION)
+static const char LVAR[4] = "LVAR";
+#endif
 
 /*! IREP TT */
 enum irep_pool_type {
@@ -155,6 +158,13 @@ static mrbc_irep * load_irep_1(mrbc_vm *vm, const uint8_t *bin, int *len)
   irep.inst = p;
 #if defined(MRBC_PARSE_DBG_SECTION)
   irep.debug_info = NULL;
+#endif
+#if defined(MRBC_PARSE_LVAR_SECTION)
+  irep.lvar_sym_ids = (uint16_t*)mrbc_raw_calloc(irep.nlocals - 1, sizeof(uint16_t)); // 0番目はselfなので1減らす
+  if(!irep.lvar_sym_ids) {
+    mrbc_raise(vm, MRBC_CLASS(Exception), "Cannot allocate");
+    return NULL;
+  }
 #endif
 
   // POOL block
@@ -417,6 +427,60 @@ static void mrbc_irep_debug_info_free(mrbc_irep_debug_info *info) {
 }
 #endif // defined(MRBC_PARSE_DBG_SECTION)
 
+#if defined(MRBC_PARSE_LVAR_SECTION)
+static void *load_lvar_records(mrbc_vm *vm, mrbc_irep *irep, const uint8_t *bin, int *len) {
+  int total_len = 0;
+  for(int i = 0; i < irep->nlocals - 1; i++) {
+    uint16_t symbol_id = bin_to_uint16(bin);
+    irep->lvar_sym_ids[i] = symbol_id;
+    bin += sizeof(uint16_t);
+    total_len += sizeof(uint16_t);
+  }
+
+  for(int i = 0; i < irep->rlen; i++) {
+    int l = 0;
+    load_lvar_records(vm, mrbc_irep_child_irep(irep, i), bin, &l);
+    bin += l;
+    total_len += l;
+  }
+
+  *len = total_len;
+  return NULL;
+}
+
+static void *load_lvar(mrbc_vm *vm, const uint8_t *bin) {
+  bin += sizeof(LVAR); // "LVAR"
+  uint32_t section_len = bin_to_uint32(bin); bin += sizeof(uint32_t);
+  uint32_t symbols_num = bin_to_uint32(bin); bin += sizeof(uint32_t);
+  
+  char **symbols = (char**)mrbc_raw_calloc(symbols_num, sizeof(char*));
+
+  for(int i = 0; i < symbols_num; i++) {
+    uint16_t symbol_len = bin_to_uint16(bin); bin += sizeof(uint16_t);
+
+    char *symbol = (char*)mrbc_raw_calloc(symbol_len + 1, sizeof(char));
+    memcpy(symbol, bin, symbol_len);
+    symbol[symbol_len] = '\0';
+
+    symbols[i] = symbol;
+    bin += symbol_len;
+  }
+
+  int len;
+  load_lvar_records(vm, vm->top_irep, bin, &len);
+
+  vm->lvar_symbols = symbols;
+  
+  return NULL;
+}
+
+static int mrbc_load_lvar(mrbc_vm *vm, const void *bytecode) {
+  const uint8_t *bin = bytecode;
+
+  load_lvar(vm, bin);
+  return mrbc_israised(vm);
+}
+#endif // defined(MRBC_PARSE_LVAR_SECTION)
 
 /***** Global functions *****************************************************/
 
@@ -444,6 +508,11 @@ int mrbc_load_mrb(mrbc_vm *vm, const void *bytecode)
 #if defined(MRBC_PARSE_DBG_SECTION)
     else if ( memcmp(bin, DBG, sizeof(DBG)) == 0 ) {
       if( mrbc_load_debug( vm, bin ) != 0 ) break;
+    }
+#endif
+#if defined(MRBC_PARSE_LVAR_SECTION)
+    else if ( memcmp(bin, LVAR, sizeof(LVAR)) == 0 ) {
+      if ( mrbc_load_lvar( vm, bin ) != 0 ) break;
     }
 #endif
     else if( memcmp(bin, END, sizeof(END)) == 0 ) {

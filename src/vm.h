@@ -80,6 +80,10 @@ typedef struct IREP {
 #if defined(MRBC_PARSE_DBG_SECTION)
   struct IREP_DEBUG_INFO *debug_info;
 #endif
+#if defined(MRBC_PARSE_LVAR_SECTION)
+  uint16_t *lvar_sym_ids;
+#endif
+
   uint16_t ofs_pools;		//!< offset of data->tbl_pools.
   uint16_t ofs_ireps;		//!< offset of data->tbl_ireps. (pointer aligned)
 
@@ -191,6 +195,9 @@ typedef struct VM {
 #if defined(MRBC_PARSE_DBG_SECTION)
   uint16_t debug_filenames_num;
   char **debug_filenames;
+#endif
+#if defined(MRBC_PARSE_LVAR_SECTION)
+  char **lvar_symbols;
 #endif
 
   struct RProc    *ret_blk;		//!< Return block.
