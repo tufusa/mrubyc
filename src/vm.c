@@ -42,6 +42,9 @@
 //! for getting the VM ID
 static uint16_t free_vm_bitmap[MAX_VM_COUNT / 16 + 1];
 
+#if defined(MRBC_USE_DEBUG_HOOK)
+void (*code_fetch_hook)(mrbc_vm *vm, const mrbc_irep *irep, const uint16_t pc);
+#endif
 
 /***** Global variables *****************************************************/
 /***** Signal catching functions ********************************************/
@@ -444,6 +447,11 @@ void mrbc_vm_close( mrbc_vm *vm )
   if( vm->flag_need_memfree ) mrbc_raw_free(vm);
 }
 
+#if defined(MRBC_USE_DEBUG_HOOK)
+void mrbc_set_code_fetch_hook(void (*hook)(mrbc_vm *vm, const mrbc_irep *irep, const uint16_t pc)) {
+  code_fetch_hook = hook;
+}
+#endif
 
 /***** opecode functions ****************************************************/
 #if defined(MRBC_SUPPORT_OP_EXT)
@@ -3201,6 +3209,10 @@ int mrbc_vm_run( mrbc_vm *vm )
 #endif
 
   while( 1 ) {
+#if defined(MRBC_USE_DEBUG_HOOK)
+    if(code_fetch_hook) code_fetch_hook(vm, vm->cur_irep, vm->inst - vm->cur_irep->inst);
+#endif
+
     mrbc_value *regs = vm->cur_regs;
     uint8_t op = *vm->inst++;		// Dispatch
 

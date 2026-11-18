@@ -224,6 +224,9 @@ void mrbc_vm_begin(mrbc_vm *vm);
 void mrbc_vm_end(mrbc_vm *vm);
 void mrbc_vm_close(mrbc_vm *vm);
 int mrbc_vm_run(mrbc_vm *vm);
+#if defined(MRBC_USE_DEBUG_HOOK)
+void mrbc_set_code_fetch_hook(void (*code_fetch_hook)(mrbc_vm *vm, const mrbc_irep *irep, const uint16_t pc));
+#endif
 //@endcond
 
 
